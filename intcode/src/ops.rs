@@ -31,6 +31,60 @@ pub const OP_OUT: Operation = Operation {
   action: &OutputAction {},
 };
 
+pub const OP_JIT: Operation = Operation {
+  opcode: 5,
+  name: "jump-if-true",
+  params: 2,
+  action: &ClosureAction(|rt, params| {
+    let pred = params[0].resolve(rt)?;
+    if pred != 0 {
+      rt.set_jump(params[1].resolve(rt)?)?;
+    }
+    Ok(())
+  }),
+};
+
+pub const OP_JIF: Operation = Operation {
+  opcode: 6,
+  name: "jump-if-false",
+  params: 2,
+  action: &ClosureAction(|rt, params| {
+    let pred = params[0].resolve(rt)?;
+    if pred == 0 {
+      rt.set_jump(params[1].resolve(rt)?)?;
+    }
+    Ok(())
+  }),
+};
+
+pub const OP_LT: Operation = Operation {
+  opcode: 7,
+  name: "less-than",
+  params: 3,
+  action: &ClosureAction(|rt, params| {
+    let lhs = params[0].resolve(rt)?;
+    let rhs = params[1].resolve(rt)?;
+    match params[2] {
+      Param::Position(addr) => rt.set(addr, if lhs < rhs { 1 } else { 0 }),
+      Param::Immediate(_) => Err("param must be positional".to_string()),
+    }
+  }),
+};
+
+pub const OP_EQ: Operation = Operation {
+  opcode: 8,
+  name: "equals",
+  params: 3,
+  action: &ClosureAction(|rt, params| {
+    let lhs = params[0].resolve(rt)?;
+    let rhs = params[1].resolve(rt)?;
+    match params[2] {
+      Param::Position(addr) => rt.set(addr, if lhs == rhs { 1 } else { 0 }),
+      Param::Immediate(_) => Err("param must be positional".to_string()),
+    }
+  }),
+};
+
 pub const OP_HLT: Operation = Operation {
   opcode: 99,
   name: "halt",
@@ -53,6 +107,13 @@ impl<F: Fn(Word, Word) -> Word> OpAction for BinAction<F> {
       }
       Param::Immediate(_) => Err("third param must be position mode".to_string()),
     }
+  }
+}
+
+struct ClosureAction<F: Fn(&mut Runtime, &Vec<Param>) -> Result<(), String>>(F);
+impl<F: Fn(&mut Runtime, &Vec<Param>) -> Result<(), String>> OpAction for ClosureAction<F> {
+  fn execute(&self, rt: &mut Runtime, params: &Vec<Param>) -> Result<(), String> {
+    (self.0)(rt, params)
   }
 }
 
@@ -95,7 +156,9 @@ pub struct Operations {
 impl Operations {
   pub fn new() -> Self {
     let mut ops = HashMap::new();
-    for op in vec![&OP_ADD, &OP_MUL, &OP_INP, &OP_OUT, &OP_HLT] {
+    for op in vec![
+      &OP_ADD, &OP_MUL, &OP_INP, &OP_OUT, &OP_HLT, &OP_JIT, &OP_JIF, &OP_EQ, &OP_LT,
+    ] {
       ops.insert(op.opcode, op);
     }
     Operations { ops }

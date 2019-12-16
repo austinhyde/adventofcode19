@@ -18,4 +18,13 @@ fn main() {
   let mut prog_input = IteratorInput::new(vec![1]);
   let mut prog_output = StdoutOutput::new();
   prog.run_io(&mut prog_input, &mut prog_output).unwrap();
+
+  /*
+  This time, when the TEST diagnostic program runs its input instruction to get the ID of the system to test, provide it 5, the ID for the ship's thermal radiator controller. This diagnostic test suite only outputs one number, the diagnostic code.
+
+  What is the diagnostic code for system ID 5?
+  */
+  println!("Part 2:");
+  prog_input = IteratorInput::new(vec![5]);
+  prog.run_io(&mut prog_input, &mut prog_output).unwrap();
 }

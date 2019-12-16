@@ -58,6 +58,7 @@ pub struct Runtime<'a> {
   mem: Memory,
   pc: usize,
   halted: bool,
+  jump: Option<usize>,
   input: &'a mut dyn io::Input,
   output: &'a mut dyn io::Output,
   ops: ops::Operations,
@@ -74,6 +75,7 @@ impl Runtime<'_> {
       mem: mem,
       pc: 0,
       halted: false,
+      jump: None,
       input,
       output,
       ops: ops::Operations::new(),
@@ -113,8 +115,20 @@ impl Runtime<'_> {
       }
       let inst = self.read_instruction()?;
       inst.execute(self)?;
-      self.pc += inst.operation.params as usize + 1;
+      match self.jump {
+        None => {
+          self.pc += inst.operation.params as usize + 1;
+        }
+        Some(addr) => {
+          self.pc = addr;
+          self.jump = None;
+        }
+      }
     }
+    Ok(())
+  }
+  pub fn set_jump(&mut self, addr: Word) -> Result<(), String> {
+    self.jump = Some(addr as usize);
     Ok(())
   }
   pub fn halt(&mut self) -> Result<(), String> {
