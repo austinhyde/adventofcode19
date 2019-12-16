@@ -1,6 +1,4 @@
-const OP_ADD: u32 = 1;
-const OP_MUL: u32 = 2;
-const OP_HLT: u32 = 99;
+use intcode::*;
 
 fn main() {
   /*
@@ -13,10 +11,10 @@ fn main() {
   Once you have a working computer, the first step is to restore the gravity assist program (your puzzle input) to the "1202 program alarm" state it had just before the last computer caught fire. To do this, before running the program, replace position 1 with the value 12 and replace position 2 with the value 2. What value is left at position 0 after the program halts?
   */
   let input = include_str!("input.txt");
-  let opcodes: &mut Vec<u32> = &mut parse(input);
+  let prog = Program::parse(input).unwrap();
 
   // before running the program, replace position 1 with the value 12 and replace position 2 with the value 2
-  let res = calculate(&opcodes, 12, 2);
+  let res = prog.run(12, 2);
   println!("Part 1: {:?}", res); // 4576384
 
   /*
@@ -25,7 +23,7 @@ fn main() {
   Find the input noun and verb that cause the program to produce the output 19690720. What is 100 * noun + verb? (For example, if noun=12 and verb=2, the answer would be 1202.)
   */
   
-  let nv = find(&opcodes, 19690720);
+  let nv = find(&prog, 19690720);
 
   match nv {
     Ok((noun, verb)) => println!(
@@ -38,10 +36,10 @@ fn main() {
   }
 }
 
-fn find(prog: &Vec<u32>, target: u32) -> Result<(u32, u32), String> {
+fn find(prog: &Program, target: Word) -> Result<(Word, Word), String> {
   for noun in 0..=99 {
     for verb in 0..=99 {
-      if let Ok(res) = calculate(&prog, noun, verb) {
+      if let Ok(res) = prog.run(noun, verb) {
         if res == target {
           return Ok((noun, verb));
         }
@@ -49,69 +47,4 @@ fn find(prog: &Vec<u32>, target: u32) -> Result<(u32, u32), String> {
     }
   }
   Err("No inputs found".into())
-}
-
-fn parse(input: &str) -> Vec<u32> {
-  input
-    .split(",")
-    .into_iter()
-    .filter_map(|s| s.parse().ok())
-    .collect()
-}
-
-// In this program, the value placed in address 1 is called the noun, and the value placed in address 2 is called the verb. Each of the two input values will be between 0 and 99, inclusive.
-fn calculate(opcodes: &Vec<u32>, noun: u32, verb: u32) -> Result<u32, String> {
-  let mut tape = opcodes.clone();
-
-  tape[1] = noun;
-  tape[2] = verb;
-
-  let mut i = 0;
-  loop {
-    match tape[i] {
-      OP_ADD => {
-        bin_assign(&mut tape, &i, std::ops::Add::add);
-        i += 4;
-      }
-      OP_MUL => {
-        bin_assign(&mut tape, &i, std::ops::Mul::mul);
-        i += 4;
-      }
-      OP_HLT => return Ok(tape[0]),
-      op => return Err(format!("Unknown opcode {}", op)),
-    }
-  }
-}
-
-fn bin_assign<F>(tape: &mut Vec<u32>, i: &usize, f: F)
-where
-  F: Fn(u32, u32) -> u32,
-{
-  let i_lhs = tape[i + 1] as usize;
-  let i_rhs = tape[i + 2] as usize;
-  let i_res = tape[i + 3] as usize;
-  tape[i_res] = f(tape[i_lhs], tape[i_rhs]);
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_examples() {
-    let cases = vec![
-      ("1,9,10,3,2,3,11,0,99,30,40,50", 9, 10, 3500),
-      ("1,0,0,0,99", 0, 0, 2),
-      ("2,4,4,0,99", 4, 4, 9801),
-      ("1,1,1,4,99,5,6,0,99", 1, 1, 30),
-    ];
-    for (prog, noun, verb, expected) in cases {
-      let actual = calculate(&parse(prog), noun, verb);
-      println!(
-        "{} ({}, {}) => expected {}, actual {:?}",
-        prog, noun, verb, expected, actual
-      );
-      assert_eq!(Ok(expected), actual);
-    }
-  }
 }
