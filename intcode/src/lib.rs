@@ -50,7 +50,7 @@ impl Program {
 pub struct Runtime {
   mem: Memory,
   pc: usize,
-  state: RuntimeState,
+  state: Option<RuntimeState>,
   jump: Option<usize>,
   ops: ops::Operations,
   read_addr: Option<Word>,
@@ -64,7 +64,7 @@ impl Runtime {
     Runtime {
       mem: mem,
       pc: 0,
-      state: RuntimeState::Ready,
+      state: None,
       jump: None,
       ops: ops::Operations::new(),
       read_addr: None,
@@ -73,7 +73,7 @@ impl Runtime {
     }
   }
   pub fn state(&self) -> RuntimeState {
-    self.state
+    self.state.unwrap()
   }
   pub fn set(&mut self, addr: Word, val: Word) -> Result<(), String> {
     if self.trace {
@@ -110,20 +110,20 @@ impl Runtime {
     if self.trace {
       println!("{}     halt()", self.id);
     }
-    self.state = RuntimeState::Complete;
+    self.state = Some(RuntimeState::Complete);
     Ok(())
   }
 
   pub fn read(&mut self, addr: Word) -> Result<(), String> {
     self.read_addr = Some(addr);
-    self.state = RuntimeState::Resumable(None);
+    self.state = Some(RuntimeState::Resumable(None));
     if self.trace {
       println!("{}     read(addr={})", self.id, addr);
     }
     Ok(())
   }
   pub fn write(&mut self, val: Word) -> Result<(), String> {
-    self.state = RuntimeState::Resumable(Some(val));
+    self.state = Some(RuntimeState::Resumable(Some(val)));
     if self.trace {
       println!("{}     write(val={})", self.id, val);
     }
@@ -134,7 +134,7 @@ impl Runtime {
     if self.trace {
       println!("{} resume({:?})", self.id, val);
     }
-    if let RuntimeState::Complete = self.state {
+    if let Some(RuntimeState::Complete) = self.state {
       return Err("Cannot resume, program complete".to_string());
     }
     if let Some(addr) = self.read_addr {
@@ -144,9 +144,9 @@ impl Runtime {
       }
     }
     self.read_addr = None;
-    self.state = RuntimeState::Ready;
+    self.state = None;
 
-    while let RuntimeState::Ready = self.state {
+    while let None = self.state {
       if self.pc >= self.mem.len() {
         return Err("Reached end of program".to_string());
       }
@@ -163,21 +163,20 @@ impl Runtime {
         }
       }
     }
-    Ok(self.state)
+    Ok(self.state.unwrap())
   }
 
-  // helper for passing an input and retrieving an output
-  // Some(val) is an output, None means we're done
-  pub fn step(&mut self, val: Word) -> Result<Option<Word>, String> {
+  // helper for passing an input, retrieving an output
+  // (output, done)
+  pub fn step(&mut self, val: Word) -> Result<(Word, bool), String> {
     match self.resume(Some(val))? {
-      RuntimeState::Ready => Err("impossible state?".to_string()),
-      RuntimeState::Resumable(None) => Err("unexpected ask for input".to_string()),
       RuntimeState::Resumable(Some(x)) => match self.resume(None)? {
-        RuntimeState::Ready => Err("impossible state?".to_string()),
-        RuntimeState::Resumable(Some(y)) => Err(format!("unexpected output {}", y)),
-        _ => Ok(Some(x)),
+        RuntimeState::Resumable(Some(_)) => Err("Unexpected output".to_string()),
+        RuntimeState::Resumable(None) => Ok((x, false)),
+        RuntimeState::Complete => Ok((x, true)),
       },
-      RuntimeState::Complete => Ok(None),
+      RuntimeState::Resumable(None) => Err("Unexpected ask for input".to_string()),
+      RuntimeState::Complete => Err("Unexpected end".to_string()),
     }
   }
 
@@ -206,8 +205,6 @@ impl Runtime {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum RuntimeState {
-  // fresh program
-  Ready,
   // Resumable(Some(_)) broken to output some value, nothing expected back
   // Resumable(None) broken to collect some input
   Resumable(Option<Word>),
