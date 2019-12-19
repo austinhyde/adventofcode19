@@ -174,9 +174,8 @@ impl Runtime {
       RuntimeState::Resumable(None) => Err("unexpected ask for input".to_string()),
       RuntimeState::Resumable(Some(x)) => match self.resume(None)? {
         RuntimeState::Ready => Err("impossible state?".to_string()),
-        RuntimeState::Resumable(None) => Ok(Some(x)),
         RuntimeState::Resumable(Some(y)) => Err(format!("unexpected output {}", y)),
-        RuntimeState::Complete => Ok(None),
+        _ => Ok(Some(x)),
       },
       RuntimeState::Complete => Ok(None),
     }

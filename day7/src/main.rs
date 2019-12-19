@@ -1,4 +1,3 @@
-use intcode::io::{IteratorInput, VecOutput};
 use intcode::{Program, Word};
 use permute::permute;
 
@@ -31,19 +30,21 @@ fn find_max(prog: &Program) -> (Word, Vec<Word>) {
 }
 
 fn run_chain(prog: &Program, phases: &Vec<Word>) -> Word {
+  let amps: Vec<_> = phases
+    .iter()
+    .map(|phase| {
+      let mut amp = prog.new_runtime();
+      amp.resume(None).unwrap();
+      amp.resume(Some(*phase)).unwrap();
+      amp
+    })
+    .collect();
+
   let mut input = 0;
-  for phase in phases {
-    input = run_amp(&prog, *phase, input);
+  for mut amp in amps {
+    input = amp.step(input).unwrap().unwrap();
   }
   input
-}
-
-fn run_amp(prog: &Program, phase: Word, input: Word) -> Word {
-  let mut input = IteratorInput::new(vec![phase, input]);
-  let mut outvec = Vec::new();
-  let mut output = VecOutput::new(&mut outvec);
-  prog.run_io(&mut input, &mut output).unwrap();
-  outvec[0]
 }
 
 #[cfg(test)]
