@@ -38,11 +38,9 @@ fn test_day5_example1() {
 
 #[test]
 fn test_day5_example2() {
-  let mut input = io::NotImplemented {};
-  let mut output = io::NotImplemented {};
   let mut rt = Program::parse("1002,4,3,4,33")
     .unwrap()
-    .new_runtime(&mut input, &mut output);
+    .new_runtime();
   rt.trace = true;
 
   // test that we parse correctly

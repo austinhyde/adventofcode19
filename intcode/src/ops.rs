@@ -7,28 +7,46 @@ pub const OP_ADD: Operation = Operation {
   opcode: 1,
   name: "add",
   params: 3,
-  action: &BinAction(std::ops::Add::add),
+  action: &ClosureAction(|rt, params| {
+    let lhs = params[0].resolve(rt)?;
+    let rhs = params[1].resolve(rt)?;
+    let addr = params[2].position()?;
+    let val = lhs + rhs;
+    if rt.trace {
+      println!("{}   setting addr {} = {} = f({}, {})", rt.id, addr, val, lhs, rhs);
+    }
+    rt.set(addr, val)
+  }),
 };
 
 pub const OP_MUL: Operation = Operation {
   opcode: 2,
   name: "mult",
   params: 3,
-  action: &BinAction(std::ops::Mul::mul),
+  action: &ClosureAction(|rt, params| {
+    let lhs = params[0].resolve(rt)?;
+    let rhs = params[1].resolve(rt)?;
+    let addr = params[2].position()?;
+    let val = lhs * rhs;
+    if rt.trace {
+      println!("{}   setting addr {} = {} = f({}, {})", rt.id, addr, val, lhs, rhs);
+    }
+    rt.set(addr, val)
+  }),
 };
 
 pub const OP_INP: Operation = Operation {
   opcode: 3,
   name: "input",
   params: 1,
-  action: &InputAction {},
+  action: &ClosureAction(|rt, params| rt.read(params[0].position()?)),
 };
 
 pub const OP_OUT: Operation = Operation {
   opcode: 4,
   name: "output",
   params: 1,
-  action: &OutputAction {},
+  action: &ClosureAction(|rt, params| rt.write(params[0].resolve(rt)?)),
 };
 
 pub const OP_JIT: Operation = Operation {
@@ -89,62 +107,13 @@ pub const OP_HLT: Operation = Operation {
   opcode: 99,
   name: "halt",
   params: 0,
-  action: &HaltAction {},
+  action: &ClosureAction(|rt, _params| rt.halt()),
 };
-
-struct BinAction<F: Fn(Word, Word) -> Word>(F);
-impl<F: Fn(Word, Word) -> Word> OpAction for BinAction<F> {
-  fn execute(&self, rt: &mut Runtime, params: &Vec<Param>) -> Result<(), String> {
-    let lhs = params[0].resolve(rt)?;
-    let rhs = params[1].resolve(rt)?;
-    match params[2] {
-      Param::Position(addr) => {
-        let val = (self.0)(lhs, rhs);
-        if rt.trace {
-          println!("  setting addr {} = {} = f({}, {})", addr, val, lhs, rhs);
-        }
-        rt.set(addr, val)
-      }
-      Param::Immediate(_) => Err("third param must be position mode".to_string()),
-    }
-  }
-}
 
 struct ClosureAction<F: Fn(&mut Runtime, &Vec<Param>) -> Result<(), String>>(F);
 impl<F: Fn(&mut Runtime, &Vec<Param>) -> Result<(), String>> OpAction for ClosureAction<F> {
   fn execute(&self, rt: &mut Runtime, params: &Vec<Param>) -> Result<(), String> {
     (self.0)(rt, params)
-  }
-}
-
-struct InputAction;
-impl OpAction for InputAction {
-  fn execute(&self, rt: &mut Runtime, params: &Vec<Param>) -> Result<(), String> {
-    match params[0] {
-      Param::Position(addr) => {
-        let v = rt.read()?;
-        if rt.trace {
-          println!("  setting addr {} = {}", addr, v);
-        }
-        rt.set(addr, v)
-      }
-      Param::Immediate(_) => Err("param must be position mode".to_string()),
-    }
-  }
-}
-
-struct OutputAction;
-impl OpAction for OutputAction {
-  fn execute(&self, rt: &mut Runtime, params: &Vec<Param>) -> Result<(), String> {
-    let val = params[0].resolve(rt)?;
-    rt.write(val)
-  }
-}
-
-struct HaltAction;
-impl OpAction for HaltAction {
-  fn execute(&self, rt: &mut Runtime, _params: &Vec<Param>) -> Result<(), String> {
-    rt.halt()
   }
 }
 
@@ -165,7 +134,7 @@ impl Operations {
   }
   pub fn parse(&self, rt: &Runtime) -> Result<Instruction, String> {
     if rt.trace {
-      println!("  parse instruction");
+      println!("{}   parse instruction", rt.id);
     }
     let mut word = rt.get_word(0)?;
     let opcode = word % 100;
@@ -217,7 +186,7 @@ pub struct Instruction {
 impl Instruction {
   pub fn execute(&self, rt: &mut Runtime) -> Result<(), String> {
     if rt.trace {
-      println!("{:?}", self);
+      println!("{} {:?}", rt.id, self);
     }
     self.operation.execute(rt, &self.params)
   }
@@ -238,6 +207,12 @@ impl Param {
     match self {
       Param::Position(addr) => rt.get(*addr),
       Param::Immediate(val) => Ok(*val),
+    }
+  }
+  pub fn position(&self) -> Result<Word, String> {
+    match self {
+      Param::Position(addr) => Ok(*addr),
+      Param::Immediate(_) => Err("must be positional parameter".to_string()),
     }
   }
 }

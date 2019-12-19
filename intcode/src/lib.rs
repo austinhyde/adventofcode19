@@ -27,12 +27,10 @@ impl Program {
     Ok(Self::new(parsed))
   }
   pub fn run(&self, noun: Word, verb: Word) -> Result<Word, String> {
-    let mut input = io::NotImplemented {};
-    let mut output = io::NotImplemented {};
-    let mut rt = Runtime::new(self.memory.clone(), &mut input, &mut output);
+    let mut rt = self.new_runtime();
     rt.set(1, noun)?;
     rt.set(2, verb)?;
-    rt.execute()?;
+    rt.resume(None)?;
     rt.get(0)
   }
 
@@ -41,50 +39,45 @@ impl Program {
     input: &mut dyn io::Input,
     output: &mut dyn io::Output,
   ) -> Result<(), String> {
-    let mut rt = Runtime::new(self.memory.clone(), input, output);
-    rt.execute()
+    self.new_runtime().run_io(input, output)
   }
 
-  pub fn new_runtime<'a>(
-    &self,
-    input: &'a mut dyn io::Input,
-    output: &'a mut dyn io::Output,
-  ) -> Runtime<'a> {
-    Runtime::new(self.memory.clone(), input, output)
+  pub fn new_runtime(&self) -> Runtime {
+    Runtime::new(self.memory.clone())
   }
 }
 
-pub struct Runtime<'a> {
+pub struct Runtime {
   mem: Memory,
   pc: usize,
-  halted: bool,
+  state: RuntimeState,
   jump: Option<usize>,
-  input: &'a mut dyn io::Input,
-  output: &'a mut dyn io::Output,
   ops: ops::Operations,
+  read_addr: Option<Word>,
+
   pub trace: bool,
+  pub id: String,
 }
 
-impl Runtime<'_> {
-  pub fn new<'a>(
-    mem: Memory,
-    input: &'a mut dyn io::Input,
-    output: &'a mut dyn io::Output,
-  ) -> Runtime<'a> {
+impl Runtime {
+  pub fn new(mem: Memory) -> Runtime {
     Runtime {
       mem: mem,
       pc: 0,
-      halted: false,
+      state: RuntimeState::Ready,
       jump: None,
-      input,
-      output,
       ops: ops::Operations::new(),
+      read_addr: None,
       trace: false,
+      id: "".to_string(),
     }
+  }
+  pub fn state(&self) -> RuntimeState {
+    self.state
   }
   pub fn set(&mut self, addr: Word, val: Word) -> Result<(), String> {
     if self.trace {
-      println!("    set(addr={}, val={})", addr, val);
+      println!("{}     set(addr={}, val={})", self.id, addr, val);
     }
     self.mem[addr as usize] = val;
     Ok(())
@@ -92,27 +85,72 @@ impl Runtime<'_> {
   pub fn get(&self, addr: Word) -> Result<Word, String> {
     let val = self.mem[addr as usize];
     if self.trace {
-      println!("    get(addr={}) -> {}", addr, val);
+      println!("{}     get(addr={}) -> {}", self.id, addr, val);
     }
     Ok(val)
   }
   pub fn get_word(&self, n: usize) -> Result<Word, String> {
     let val = self.mem[self.pc + n];
     if self.trace {
-      println!("    get_word(pc={}, n={}) -> {}", self.pc, n, val);
+      println!(
+        "{}     get_word(pc={}, n={}) -> {}",
+        self.id, self.pc, n, val
+      );
     }
     Ok(val)
   }
   pub fn read_instruction(&self) -> Result<ops::Instruction, String> {
     self.ops.parse(self)
   }
-  pub fn execute(&mut self) -> Result<(), String> {
-    self.pc = 0;
-    self.halted = false;
-    while !self.halted {
+  pub fn set_jump(&mut self, addr: Word) -> Result<(), String> {
+    self.jump = Some(addr as usize);
+    Ok(())
+  }
+  pub fn halt(&mut self) -> Result<(), String> {
+    if self.trace {
+      println!("{}     halt()", self.id);
+    }
+    self.state = RuntimeState::Complete;
+    Ok(())
+  }
+
+  pub fn read(&mut self, addr: Word) -> Result<(), String> {
+    self.read_addr = Some(addr);
+    self.state = RuntimeState::Resumable(None);
+    if self.trace {
+      println!("{}     read(addr={})", self.id, addr);
+    }
+    Ok(())
+  }
+  pub fn write(&mut self, val: Word) -> Result<(), String> {
+    self.state = RuntimeState::Resumable(Some(val));
+    if self.trace {
+      println!("{}     write(val={})", self.id, val);
+    }
+    Ok(())
+  }
+
+  pub fn resume(&mut self, val: Option<Word>) -> Result<RuntimeState, String> {
+    if self.trace {
+      println!("{} resume({:?})", self.id, val);
+    }
+    if let RuntimeState::Complete = self.state {
+      return Err("Cannot resume, program complete".to_string());
+    }
+    if let Some(addr) = self.read_addr {
+      match val {
+        Some(x) => self.set(addr, x)?,
+        None => return Err("Expected to resume with a value and did not".to_string()),
+      }
+    }
+    self.read_addr = None;
+    self.state = RuntimeState::Ready;
+
+    while let RuntimeState::Ready = self.state {
       if self.pc >= self.mem.len() {
         return Err("Reached end of program".to_string());
       }
+
       let inst = self.read_instruction()?;
       inst.execute(self)?;
       match self.jump {
@@ -125,30 +163,55 @@ impl Runtime<'_> {
         }
       }
     }
+    Ok(self.state)
+  }
+
+  // helper for passing an input and retrieving an output
+  // Some(val) is an output, None means we're done
+  pub fn step(&mut self, val: Word) -> Result<Option<Word>, String> {
+    match self.resume(Some(val))? {
+      RuntimeState::Ready => Err("impossible state?".to_string()),
+      RuntimeState::Resumable(None) => Err("unexpected ask for input".to_string()),
+      RuntimeState::Resumable(Some(x)) => match self.resume(None)? {
+        RuntimeState::Ready => Err("impossible state?".to_string()),
+        RuntimeState::Resumable(None) => Ok(Some(x)),
+        RuntimeState::Resumable(Some(y)) => Err(format!("unexpected output {}", y)),
+        RuntimeState::Complete => Ok(None),
+      },
+      RuntimeState::Complete => Ok(None),
+    }
+  }
+
+  pub fn run_io(
+    &mut self,
+    input: &mut dyn io::Input,
+    output: &mut dyn io::Output,
+  ) -> Result<(), String> {
+    let mut next = None;
+    while let RuntimeState::Resumable(val) = self.resume(next)? {
+      match val {
+        // output, expect nothing back
+        Some(x) => {
+          output.write(x)?;
+          next = None;
+        }
+        // input, expect a new value
+        None => {
+          next = Some(input.read()?);
+        }
+      }
+    }
     Ok(())
   }
-  pub fn set_jump(&mut self, addr: Word) -> Result<(), String> {
-    self.jump = Some(addr as usize);
-    Ok(())
-  }
-  pub fn halt(&mut self) -> Result<(), String> {
-    if self.trace {
-      println!("    halt()");
-    }
-    self.halted = true;
-    Ok(())
-  }
-  pub fn read(&mut self) -> Result<Word, String> {
-    let val = self.input.read()?;
-    if self.trace {
-      println!("    read() -> {}", val);
-    }
-    Ok(val)
-  }
-  pub fn write(&mut self, val: Word) -> Result<(), String> {
-    if self.trace {
-      println!("    write(val={})", val);
-    }
-    self.output.write(val)
-  }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum RuntimeState {
+  // fresh program
+  Ready,
+  // Resumable(Some(_)) broken to output some value, nothing expected back
+  // Resumable(None) broken to collect some input
+  Resumable(Option<Word>),
+  // halted
+  Complete,
 }
