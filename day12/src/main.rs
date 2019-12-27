@@ -1,3 +1,4 @@
+use num::integer::lcm;
 use std::str::FromStr;
 
 fn main() {
@@ -7,20 +8,67 @@ fn main() {
     /*
     What is the total energy in the system after simulating the moons given in your scan for 1000 steps?
     */
-    system.simulate(1000);
-    println!("Part 1: {}", system.total_energy()); // 8454
+    let mut simulated = system.clone();
+    simulated.simulate(1000);
+    println!("Part 1: {}", simulated.total_energy()); // 8454
+
+    /*
+    How many steps does it take to reach the first state that exactly matches a previous state?
+    */
+    println!("Part 2: {}", system.steps_until_repeat())
 }
 
 /*
 The space near Jupiter is not a very safe place; you need to be careful of a big distracting red spot, extreme radiation, and a whole lot of moons swirling around. You decide to start by tracking the four largest moons: Io, Europa, Ganymede, and Callisto.
 */
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 struct System {
     moons: Vec<Moon>,
 }
 impl System {
     fn new(moons: Vec<Moon>) -> Self {
         Self { moons }
+    }
+    fn steps_until_repeat(&mut self) -> u64 {
+        let mut step = 0;
+        let initial = self.moons.clone();
+        let mut x_steps = 0;
+        let mut y_steps = 0;
+        let mut z_steps = 0;
+        loop {
+            // we'll watch x, y, and z independently.
+            // the final result will by the least common multiple of the steps required for each axis
+            self.step();
+            step += 1;
+            let mut x_match = true;
+            let mut y_match = true;
+            let mut z_match = true;
+            for (init, moon) in initial.iter().zip(&self.moons) {
+                if x_steps == 0 && !init.eq_x(moon) {
+                    x_match = false;
+                }
+                if y_steps == 0 && !init.eq_y(moon) {
+                    y_match = false;
+                }
+                if z_steps == 0 && !init.eq_z(moon) {
+                    z_match = false;
+                }
+            }
+            if x_steps == 0 && x_match {
+                x_steps = step;
+            }
+            if y_steps == 0 && y_match {
+                y_steps = step;
+            }
+            if z_steps == 0 && z_match {
+                z_steps = step;
+            }
+            if x_steps != 0 && y_steps != 0 && z_steps != 0 {
+                break;
+            }
+        }
+
+        lcm(x_steps, lcm(y_steps, z_steps))
     }
     fn simulate(&mut self, steps: usize) {
         for _ in 0..steps {
@@ -85,6 +133,15 @@ impl Moon {
             velocity: Vector::zero(),
         }
     }
+    fn eq_x(&self, other: &Moon) -> bool {
+        self.position.eq_x(&other.position) && self.velocity.eq_x(&other.velocity)
+    }
+    fn eq_y(&self, other: &Moon) -> bool {
+        self.position.eq_y(&other.position) && self.velocity.eq_y(&other.velocity)
+    }
+    fn eq_z(&self, other: &Moon) -> bool {
+        self.position.eq_z(&other.position) && self.velocity.eq_z(&other.velocity)
+    }
     fn apply_gravity(&mut self, other: &Moon) {
         /*
         On each axis (x, y, and z), the velocity of each moon changes by exactly +1 or -1 to pull the moons together. For example, if Ganymede has an x position of 3, and Callisto has a x position of 5, then Ganymede's x velocity changes by +1 (because 5 > 3) and Callisto's x velocity changes by -1 (because 3 < 5). However, if the positions on a given axis are the same, the velocity on that axis does not change for that pair of moons.
@@ -146,6 +203,15 @@ impl Vector {
     }
     fn signum(&self) -> Vector {
         Vector::new(self.x.signum(), self.y.signum(), self.z.signum())
+    }
+    fn eq_x(&self, other: &Vector) -> bool {
+        self.x == other.x
+    }
+    fn eq_y(&self, other: &Vector) -> bool {
+        self.y == other.y
+    }
+    fn eq_z(&self, other: &Vector) -> bool {
+        self.z == other.z
     }
 }
 impl std::fmt::Debug for Vector {
@@ -308,5 +374,33 @@ mod tests {
 
         system.simulate(100);
         assert_eq!(system.total_energy(), 1940);
+    }
+
+    #[test]
+    fn part2_example1() {
+        let mut system: System = "
+                <x=-1, y=0, z=2>
+                <x=2, y=-10, z=-7>
+                <x=4, y=-8, z=8>
+                <x=3, y=5, z=-1>
+            "
+        .parse()
+        .unwrap();
+
+        assert_eq!(system.steps_until_repeat(), 2772);
+    }
+
+    #[test]
+    fn part2_example2() {
+        let mut system: System = "
+                <x=-8, y=-10, z=0>
+                <x=5, y=5, z=10>
+                <x=2, y=-7, z=3>
+                <x=9, y=-8, z=-3>
+            "
+        .parse()
+        .unwrap();
+
+        assert_eq!(system.steps_until_repeat(), 4686774924);
     }
 }
