@@ -51,6 +51,31 @@ impl Program {
         Ok(v)
     }
 
+    pub fn run_loop<F>(
+        &self,
+        inputs: Vec<Word>,
+        n_outputs: usize,
+        mut handler: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(Vec<Word>) -> Vec<Word>,
+    {
+        let mut rt = self.new_runtime();
+        let mut curr_inputs = inputs.clone();
+
+        rt.resume(None)?;
+        let (mut out, mut done) = rt.stepn(curr_inputs, n_outputs)?;
+        loop {
+            curr_inputs = handler(out);
+            if done {
+                break Ok(());
+            }
+            let (_out, _done) = rt.stepn(curr_inputs, n_outputs)?;
+            out = _out;
+            done = _done;
+        }
+    }
+
     pub fn new_runtime(&self) -> Runtime {
         Runtime::new(self.operations.clone())
     }
@@ -244,14 +269,50 @@ impl Runtime {
     // helper for passing an input, retrieving an output
     // (output, done)
     pub fn step(&mut self, val: Word) -> Result<(Word, bool), String> {
-        match self.resume(Some(val))? {
-            RuntimeState::Resumable(Some(x)) => match self.resume(None)? {
-                RuntimeState::Resumable(Some(_)) => Err("Unexpected output".to_string()),
-                RuntimeState::Resumable(None) => Ok((x, false)),
-                RuntimeState::Complete => Ok((x, true)),
-            },
-            RuntimeState::Resumable(None) => Err("Unexpected ask for input".to_string()),
-            RuntimeState::Complete => Err("Unexpected end".to_string()),
+        let r = self.stepn(vec![val], 1)?;
+        Ok((r.0[0], r.1))
+    }
+
+    // helper for passing any number of inputs, then getting n outputs
+    pub fn stepn(&mut self, vals: Vec<Word>, n: usize) -> Result<(Vec<Word>, bool), String> {
+        // provide all but one input
+        for v in &vals[0..vals.len() - 1] {
+            match self.resume(Some(*v))? {
+                RuntimeState::Complete => {
+                    return Err("Unexpected complete during inputs".to_string())
+                }
+                RuntimeState::Resumable(Some(_)) => {
+                    return Err("Unexpected output during inputs".to_string())
+                }
+                RuntimeState::Resumable(None) => (),
+            }
+        }
+
+        // provide the last input, read n outputs
+        let mut out = Vec::new();
+        let mut val = Some(vals[vals.len() - 1]);
+        for i in 0..n {
+            match self.resume(val)? {
+                RuntimeState::Complete => {
+                    return Err(format!("Unexpected complete after output {}", i));
+                }
+                RuntimeState::Resumable(None) => {
+                    return Err(format!("Unexpected ask for input after output {}", i));
+                }
+                RuntimeState::Resumable(Some(x)) => {
+                    val = None;
+                    out.push(x);
+                }
+            }
+        }
+
+        // advance one more time and return
+        match self.resume(None)? {
+            RuntimeState::Complete => Ok((out, true)),
+            RuntimeState::Resumable(None) => Ok((out, false)),
+            RuntimeState::Resumable(Some(_)) => {
+                Err("Unexpected output after reading all outputs".to_string())
+            }
         }
     }
 
