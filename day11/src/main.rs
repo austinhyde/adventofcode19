@@ -102,16 +102,9 @@ impl Robot {
         */
 
         let mut rt = prog.new_runtime();
-        rt.resume(None).unwrap();
-        let (mut out, mut done) = rt.stepn(vec![self.read_camera() as Word], 2)?;
-        loop {
+        while rt.start()? {
+            let out = rt.stepn(vec![self.read_camera() as Word], 2)?;
             self.prog_command(out[0], out[1]);
-            if done {
-                break;
-            }
-            let r = rt.stepn(vec![self.read_camera() as Word], 2)?;
-            out = r.0;
-            done = r.1;
         }
         Ok(())
     }
